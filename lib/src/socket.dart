@@ -360,7 +360,12 @@ class PhoenixSocket {
     return (_pendingMessages[message.ref!] = Completer<Message>()).future;
   }
 
-  void _addToSink(String data) {
+  // `MessageSerializer.encode` returns a `String` for JSON payloads and a
+  // `Uint8List` for binary ones (`BinaryDecoder.binaryEncode`); typing this
+  // parameter `String` made every binary send throw a TypeError before it
+  // reached the sink, while binary receive worked fine. The sink itself
+  // accepts both (`WebSocketSink.add` takes String or List<int>).
+  void _addToSink(dynamic data) {
     if (_disposed) {
       return;
     }
