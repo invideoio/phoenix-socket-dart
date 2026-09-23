@@ -17,6 +17,7 @@ class PhoenixSocketOptions {
     /// The duration after which a heartbeat request
     /// is considered timed out
     Duration? heartbeatTimeout,
+    this.waitForHeartbeatTimeout = false,
 
     /// Function to decode binary payloads
     PayloadDecoderCallback? payloadDecoder,
@@ -74,6 +75,13 @@ class PhoenixSocketOptions {
   /// duration, the connection is considered lost.
   Duration get heartbeatTimeout => _heartbeatTimeout;
 
+  /// Opt-in policy for waiting until [heartbeatTimeout] for a pending reply.
+  ///
+  /// While pending, periodic ticks do not send another heartbeat or extend its
+  /// deadline. False preserves the existing next-periodic-tick close policy.
+  /// A longer wait also delays detection of an unresponsive connection.
+  final bool waitForHeartbeatTimeout;
+
   /// Optional list of Duration between reconnect attempts
   final List<Duration> reconnectDelays;
 
@@ -91,7 +99,7 @@ class PhoenixSocketOptions {
   /// No additional message subscription or decoding is performed.
   final void Function(PhoenixSocketDiagnosticEvent event)? onDiagnostic;
 
-  /// Optional scalar snapshots on heartbeat submission and pending close.
+  /// Optional scalar snapshots on heartbeat submission and heartbeat close.
   ///
   /// Enables receive counters and primary serializer timing. With this null,
   /// the original raw-message path uses no diagnostic clocks or envelopes.

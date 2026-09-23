@@ -501,6 +501,9 @@ class PhoenixSocket {
     if (!isConnected) return false;
 
     if (_nextHeartbeatRef != null && !ignorePreviousHeartbeat) {
+      // The original send owns its reply timeout. Do not replace its reference,
+      // send another request, or restart the deadline on a periodic tick.
+      if (_options.waitForHeartbeatTimeout) return false;
       _nextHeartbeatRef = null;
       if (_ws != null) {
         _diagnose(PhoenixSocketDiagnosticEvent.heartbeatClosePending);
@@ -509,8 +512,14 @@ class PhoenixSocket {
       return false;
     }
 
+    final transport = _ws;
+    String? sentRef;
+    Future<Message>? pendingReply;
     try {
-      final reply = sendMessage(_heartbeatMessage());
+      final heartbeat = _heartbeatMessage();
+      sentRef = heartbeat.ref;
+      final reply = sendMessage(heartbeat);
+      pendingReply = reply;
       _diagnose(PhoenixSocketDiagnosticEvent.heartbeatSent);
       await reply.timeout(_options.heartbeatTimeout);
       _logger.fine('[phoenix_socket] Heartbeat completed');
@@ -521,7 +530,19 @@ class PhoenixSocket {
         err,
         stacktrace,
       );
-      if (_ws != null) {
+      // A manual replacement can leave this old request registered. Remove
+      // only our own expired entry; a newer request/ref must remain untouched.
+      if (_options.waitForHeartbeatTimeout &&
+          pendingReply != null &&
+          identical(_pendingMessages[sentRef]?.future, pendingReply)) {
+        _pendingMessages.remove(sentRef);
+      }
+      final currentHeartbeat = !_disposed &&
+          isConnected &&
+          identical(_ws, transport) &&
+          _nextHeartbeatRef == sentRef;
+      if (_ws != null &&
+          (!_options.waitForHeartbeatTimeout || currentHeartbeat)) {
         _diagnose(PhoenixSocketDiagnosticEvent.heartbeatCloseTimeout);
         _closeSink(normalClosure, 'heartbeat timeout');
       }
@@ -654,7 +675,8 @@ class PhoenixSocket {
     if (_disposed) return;
     // Freeze scalars and the current-send baseline before either observer runs.
     final snapshot = event == PhoenixSocketDiagnosticEvent.heartbeatSent ||
-            event == PhoenixSocketDiagnosticEvent.heartbeatClosePending
+            event == PhoenixSocketDiagnosticEvent.heartbeatClosePending ||
+            event == PhoenixSocketDiagnosticEvent.heartbeatCloseTimeout
         ? _receiveDiagnostics?.snapshot(event)
         : null;
     try {

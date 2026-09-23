@@ -61,7 +61,7 @@ class PhoenixSocketReceiveCounters {
   final int heartbeatRepliesNoPending;
 }
 
-/// Immutable observation at local heartbeat submission or pending-close decision.
+/// Immutable observation at local heartbeat submission or heartbeat-close decision.
 ///
 /// Receive counters cover complete WebSocket messages, not transport byte
 /// progress. Silence cannot distinguish a peer/network delay from an unfinished
