@@ -1,3 +1,4 @@
+import 'events.dart';
 import 'message_serializer.dart';
 
 /// Options for the open Phoenix socket.
@@ -43,6 +44,7 @@ class PhoenixSocketOptions {
     ///
     /// Either this or [params] car to be provided, but not both.
     this.dynamicParams,
+    this.onDiagnostic,
     MessageSerializer? serializer,
   })  : _timeout = timeout ?? const Duration(seconds: 10),
         serializer =
@@ -80,6 +82,13 @@ class PhoenixSocketOptions {
 
   /// Will be called to get fresh params before each connection attempt.
   final Future<Map<String, String>> Function()? dynamicParams;
+
+  /// Optional synchronous, payload-free lifecycle observer.
+  ///
+  /// Keep this callback inexpensive and do not mutate the socket from it.
+  /// Callback failures are ignored so diagnostics cannot interrupt transport.
+  /// No additional message subscription or decoding is performed.
+  final void Function(PhoenixSocketDiagnosticEvent event)? onDiagnostic;
 
   /// Get connection params.
   Future<Map<String, String>> getParams() async {

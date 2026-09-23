@@ -15,6 +15,20 @@ Look at the [example project][5] for an example on how to use this library. The 
 look like javascript's as much as possible, but leveraging Dart's unique native advantages like Streams
 and Futures.
 
+## Optional connection diagnostics
+
+`PhoenixSocketOptions.onDiagnostic` observes payload-free enum events from the
+existing heartbeat and socket handlers. It does not subscribe to messages,
+decode frames again, or change heartbeat/reconnect policy. Keep the callback
+inexpensive; exceptions from it are ignored.
+
+`heartbeatSent` means the local sink accepted the heartbeat, and
+`heartbeatAcknowledged` means the current heartbeat reference was matched by the
+existing receive handler. `heartbeatClosePending` and `heartbeatCloseTimeout`
+identify two different local close decisions. They do not establish why a reply
+was missing. A local close cause cannot be inferred from the peer close reason:
+an adapter may complete its stream before it receives peer close details.
+
 [1]: https://www.phoenixframework.org/
 [2]: https://hexdocs.pm/phoenix/Phoenix.Channel.html#content
 [3]: https://hexdocs.pm/phoenix/Phoenix.Presence.html#content

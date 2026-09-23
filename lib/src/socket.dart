@@ -205,7 +205,7 @@ class PhoenixSocket {
           .where(_shouldPipeMessage)
           .listen(_onSocketData, cancelOnError: true)
         ..onError(_onSocketError)
-        ..onDone(_onSocketClosed);
+        ..onDone(_onSocketStreamDone);
     } catch (error, stacktrace) {
       _onSocketError(error, stacktrace);
     }
@@ -473,13 +473,16 @@ class PhoenixSocket {
     if (_nextHeartbeatRef != null && !ignorePreviousHeartbeat) {
       _nextHeartbeatRef = null;
       if (_ws != null) {
+        _diagnose(PhoenixSocketDiagnosticEvent.heartbeatClosePending);
         _closeSink(normalClosure, 'heartbeat timeout');
       }
       return false;
     }
 
     try {
-      await sendMessage(_heartbeatMessage()).timeout(_options.heartbeatTimeout);
+      final reply = sendMessage(_heartbeatMessage());
+      _diagnose(PhoenixSocketDiagnosticEvent.heartbeatSent);
+      await reply.timeout(_options.heartbeatTimeout);
       _logger.fine('[phoenix_socket] Heartbeat completed');
       return true;
     } on TimeoutException catch (err, stacktrace) {
@@ -489,6 +492,7 @@ class PhoenixSocket {
         stacktrace,
       );
       if (_ws != null) {
+        _diagnose(PhoenixSocketDiagnosticEvent.heartbeatCloseTimeout);
         _closeSink(normalClosure, 'heartbeat timeout');
       }
       return false;
@@ -535,6 +539,7 @@ class PhoenixSocket {
     if (message.ref != null) {
       if (_nextHeartbeatRef == message.ref) {
         _nextHeartbeatRef = null;
+        _diagnose(PhoenixSocketDiagnosticEvent.heartbeatAcknowledged);
       }
 
       final completer = _pendingMessages[message.ref!];
@@ -552,6 +557,7 @@ class PhoenixSocket {
   void _onSocketData(message) => onSocketDataCallback(message);
 
   void _onSocketError(dynamic error, dynamic stacktrace) {
+    _diagnose(PhoenixSocketDiagnosticEvent.socketError);
     final socketError = PhoenixSocketErrorEvent(
       error: error,
       stacktrace: stacktrace,
@@ -570,6 +576,20 @@ class PhoenixSocket {
     _pendingMessages.clear();
 
     _onSocketClosed();
+  }
+
+  void _onSocketStreamDone() {
+    _diagnose(PhoenixSocketDiagnosticEvent.socketStreamDone);
+    _onSocketClosed();
+  }
+
+  void _diagnose(PhoenixSocketDiagnosticEvent event) {
+    if (_disposed) return;
+    try {
+      _options.onDiagnostic?.call(event);
+    } catch (_) {
+      // Observability must not change heartbeat or reconnect behavior.
+    }
   }
 
   void _onSocketClosed() {

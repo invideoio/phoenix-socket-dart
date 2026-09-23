@@ -1,6 +1,30 @@
 import 'channel.dart';
 import 'socket.dart';
 
+/// Payload-free lifecycle observations for optional connection diagnostics.
+///
+/// These describe local client decisions, not the cause of a missing reply.
+enum PhoenixSocketDiagnosticEvent {
+  /// A heartbeat was accepted by the local WebSocket sink, not necessarily
+  /// delivered to the server.
+  heartbeatSent,
+
+  /// The existing message handler received the current heartbeat's reply.
+  heartbeatAcknowledged,
+
+  /// A heartbeat was still outstanding at the next periodic heartbeat tick.
+  heartbeatClosePending,
+
+  /// The heartbeat reply future exceeded its configured timeout.
+  heartbeatCloseTimeout,
+
+  /// The underlying WebSocket stream called its done handler.
+  socketStreamDone,
+
+  /// The existing socket error handler was entered.
+  socketError,
+}
+
 /// Base socket event
 abstract class PhoenixSocketEvent {
   const PhoenixSocketEvent();
