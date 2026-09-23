@@ -45,6 +45,7 @@ class PhoenixSocketOptions {
     /// Either this or [params] car to be provided, but not both.
     this.dynamicParams,
     this.onDiagnostic,
+    this.onHeartbeatDiagnostic,
     MessageSerializer? serializer,
   })  : _timeout = timeout ?? const Duration(seconds: 10),
         serializer =
@@ -89,6 +90,14 @@ class PhoenixSocketOptions {
   /// Callback failures are ignored so diagnostics cannot interrupt transport.
   /// No additional message subscription or decoding is performed.
   final void Function(PhoenixSocketDiagnosticEvent event)? onDiagnostic;
+
+  /// Optional scalar snapshots on heartbeat submission and pending close.
+  ///
+  /// Enables receive counters and primary serializer timing. With this null,
+  /// the original raw-message path uses no diagnostic clocks or envelopes.
+  /// Keep observers inexpensive; exceptions cannot interrupt the transport.
+  final void Function(PhoenixHeartbeatDiagnosticSnapshot snapshot)?
+      onHeartbeatDiagnostic;
 
   /// Get connection params.
   Future<Map<String, String>> getParams() async {

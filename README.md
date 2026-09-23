@@ -29,6 +29,32 @@ identify two different local close decisions. They do not establish why a reply
 was missing. A local close cause cannot be inferred from the peer close reason:
 an adapter may complete its stream before it receives peer close details.
 
+For a deeper development-only probe, `onHeartbeatDiagnostic` enables immutable
+scalar snapshots at `heartbeatSent` and `heartbeatClosePending`. It counts
+complete accepted text messages (UTF-16 code units, not encoded bytes) and binary
+messages/bytes, primary serializer attempts/errors/duration, and fixed
+`phoenix`/`phx_reply` matched/unmatched/no-pending classifications. It exposes no
+raw references, topics, payloads, endpoints, or errors. The current-send interval
+is reset before the Sent snapshot, so it starts at zero; generation totals retain
+earlier activity. Interval decode maxima are measured separately. Receive and
+decode counters describe their respective boundaries: a message received before
+Sent can be decoded afterward, so their interval counts need not be equal.
+
+This optional probe times only the existing primary decoder. Public
+`messageStream` consumers retain their existing independent decoding behavior,
+and are not added to diagnostic decode totals. Internal debug envelopes retain
+the original raw object and transport-generation accumulator without copying
+payloads. A virtual `onSocketDataCallback` override still receives the raw object;
+explicit external calls to that callback use the current attempt's accumulator.
+Queued/late old-transport delivery cannot add to the new attempt's counters.
+With this observer absent, no receive-diagnostic clocks/envelopes are created.
+
+Complete-message silence is not evidence of server silence: the WebSocket
+adapter delivers data after a complete message, so an unfinished large message,
+network delay and delayed server response cannot be distinguished by this probe.
+Serializer errors keep their original propagation behavior; observers cannot
+throw into the transport. Enable this only when investigating a connection.
+
 [1]: https://www.phoenixframework.org/
 [2]: https://hexdocs.pm/phoenix/Phoenix.Channel.html#content
 [3]: https://hexdocs.pm/phoenix/Phoenix.Presence.html#content

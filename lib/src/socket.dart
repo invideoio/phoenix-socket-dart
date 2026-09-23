@@ -17,6 +17,7 @@ import 'push.dart';
 import 'socket_options.dart';
 
 part '_stream_router.dart';
+part '_socket_diagnostics.dart';
 
 /// State of a [PhoenixSocket].
 enum SocketState {
@@ -65,8 +66,20 @@ class PhoenixSocket {
 
     _reconnects = _options.reconnectDelays;
 
-    _messageStream =
-        _receiveStreamController.stream.map(_options.serializer.decode);
+    final Stream<Message> primaryMessages;
+    if (_options.onHeartbeatDiagnostic == null) {
+      _messageStream =
+          _receiveStreamController.stream.map(_options.serializer.decode);
+      primaryMessages = _messageStream;
+    } else {
+      // Keep public consumers' original independent serializer behavior; only
+      // the existing primary consumer measures decoding. No extra subscriber.
+      _messageStream = _receiveStreamController.stream.map((message) => _options
+          .serializer
+          .decode(message is _DiagnosticSocketMessage ? message.raw : message));
+      primaryMessages =
+          _receiveStreamController.stream.map(_decodePrimaryForDiagnostics);
+    }
 
     _openStream =
         _stateStreamController.stream.whereType<PhoenixSocketOpenEvent>();
@@ -78,7 +91,7 @@ class PhoenixSocket {
         _stateStreamController.stream.whereType<PhoenixSocketErrorEvent>();
 
     _subscriptions = [
-      _messageStream.listen(_onMessage),
+      primaryMessages.listen(_onMessage),
       _openStream.listen((_) => _startHeartbeat()),
       _closeStream.listen((_) => _cancelHeartbeat())
     ];
@@ -109,6 +122,9 @@ class PhoenixSocket {
   SocketState _socketState;
 
   WebSocketChannel? _ws;
+  _SocketReceiveDiagnostics? _receiveDiagnostics;
+  _SocketReceiveDiagnostics? _receivingTransportDiagnostics;
+  int _diagnosticGeneration = 0;
 
   _StreamRouter<Message>? _router;
 
@@ -193,6 +209,10 @@ class PhoenixSocket {
       throw StateError('PhoenixSocket cannot connect after being disposed.');
     }
 
+    final diagnostics = _options.onHeartbeatDiagnostic == null
+        ? null
+        : _SocketReceiveDiagnostics(++_diagnosticGeneration);
+    _receiveDiagnostics = diagnostics;
     _mountPoint = await _buildMountPoint(_endpoint, _options);
     _logger.finest(() => 'Attempting to connect to $_mountPoint');
 
@@ -201,9 +221,11 @@ class PhoenixSocket {
           ? _webSocketChannelFactory!(_mountPoint)
           : WebSocketChannel.connect(_mountPoint);
 
-      _ws!.stream
-          .where(_shouldPipeMessage)
-          .listen(_onSocketData, cancelOnError: true)
+      _ws!.stream.where(_shouldPipeMessage).listen(
+          diagnostics == null
+              ? _onSocketData
+              : (message) => _onDiagnosticSocketData(message, diagnostics),
+          cancelOnError: true)
         ..onError(_onSocketError)
         ..onDone(_onSocketStreamDone);
     } catch (error, stacktrace) {
@@ -422,7 +444,15 @@ class PhoenixSocket {
   onSocketDataCallback(message) {
     if (message is String || message is Uint8List) {
       if (!_receiveStreamController.isClosed) {
-        _receiveStreamController.add(message);
+        final diagnostics =
+            _receivingTransportDiagnostics ?? _receiveDiagnostics;
+        if (diagnostics == null) {
+          _receiveStreamController.add(message);
+        } else {
+          diagnostics.received(message);
+          _receiveStreamController
+              .add(_DiagnosticSocketMessage(message, diagnostics));
+        }
       }
     } else {
       throw ArgumentError('Received a non-string');
@@ -556,6 +586,43 @@ class PhoenixSocket {
 
   void _onSocketData(message) => onSocketDataCallback(message);
 
+  void _onDiagnosticSocketData(
+      dynamic message, _SocketReceiveDiagnostics diagnostics) {
+    // Preserve the virtual callback's original raw argument and restore context
+    // even when a custom callback throws or invokes another callback reentrantly.
+    final previous = _receivingTransportDiagnostics;
+    _receivingTransportDiagnostics = diagnostics;
+    try {
+      _onSocketData(message);
+    } finally {
+      _receivingTransportDiagnostics = previous;
+    }
+  }
+
+  Message _decodePrimaryForDiagnostics(dynamic raw) {
+    if (raw is! _DiagnosticSocketMessage) {
+      return _options.serializer.decode(raw);
+    }
+    final diagnostics = raw.diagnostics;
+    final start = diagnostics.clock.elapsedMicroseconds;
+    var failed = true;
+    late final Message message;
+    try {
+      message = _options.serializer.decode(raw.raw);
+      failed = false;
+    } finally {
+      // A serializer error retains its original propagation/stack semantics.
+      diagnostics.decoded(
+          diagnostics.clock.elapsedMicroseconds - start, failed);
+    }
+    if (identical(diagnostics, _receiveDiagnostics)) {
+      // Classify before _onMessage clears the pending reference. Stale
+      // transport messages never classify against a newer generation's ref.
+      diagnostics.heartbeatReply(message, _nextHeartbeatRef);
+    }
+    return message;
+  }
+
   void _onSocketError(dynamic error, dynamic stacktrace) {
     _diagnose(PhoenixSocketDiagnosticEvent.socketError);
     final socketError = PhoenixSocketErrorEvent(
@@ -585,10 +652,22 @@ class PhoenixSocket {
 
   void _diagnose(PhoenixSocketDiagnosticEvent event) {
     if (_disposed) return;
+    // Freeze scalars and the current-send baseline before either observer runs.
+    final snapshot = event == PhoenixSocketDiagnosticEvent.heartbeatSent ||
+            event == PhoenixSocketDiagnosticEvent.heartbeatClosePending
+        ? _receiveDiagnostics?.snapshot(event)
+        : null;
     try {
       _options.onDiagnostic?.call(event);
     } catch (_) {
       // Observability must not change heartbeat or reconnect behavior.
+    }
+    if (snapshot != null) {
+      try {
+        _options.onHeartbeatDiagnostic?.call(snapshot);
+      } catch (_) {
+        // An independent observer failure cannot suppress transport behavior.
+      }
     }
   }
 

@@ -25,6 +25,72 @@ enum PhoenixSocketDiagnosticEvent {
   socketError,
 }
 
+/// Immutable, payload-free receive counters for one diagnostic interval.
+class PhoenixSocketReceiveCounters {
+  const PhoenixSocketReceiveCounters({
+    required this.textMessages,
+    required this.textCodeUnits,
+    required this.binaryMessages,
+    required this.binaryBytes,
+    required this.decodeCount,
+    required this.decodeErrors,
+    required this.decodeTotalMicroseconds,
+    required this.decodeMaxMicroseconds,
+    required this.heartbeatRepliesMatched,
+    required this.heartbeatRepliesUnmatched,
+    required this.heartbeatRepliesNoPending,
+  });
+
+  final int textMessages;
+
+  /// UTF-16 code units, not encoded bytes; measuring this does not encode/copy.
+  final int textCodeUnits;
+  final int binaryMessages;
+  final int binaryBytes;
+
+  /// Serializer attempts on the existing primary message consumer only.
+  final int decodeCount;
+  final int decodeErrors;
+  final int decodeTotalMicroseconds;
+  final int decodeMaxMicroseconds;
+
+  /// Only replies on the protocol's fixed `phoenix`/`phx_reply` route count.
+  /// Other messages are not classified or exposed.
+  final int heartbeatRepliesMatched;
+  final int heartbeatRepliesUnmatched;
+  final int heartbeatRepliesNoPending;
+}
+
+/// Immutable observation at local heartbeat submission or pending-close decision.
+///
+/// Receive counters cover complete WebSocket messages, not transport byte
+/// progress. Silence cannot distinguish a peer/network delay from an unfinished
+/// large message. No reference, topic, payload, URL, or error text is exposed.
+class PhoenixHeartbeatDiagnosticSnapshot {
+  const PhoenixHeartbeatDiagnosticSnapshot({
+    required this.event,
+    required this.connectionGeneration,
+    required this.generationElapsedMilliseconds,
+    required this.heartbeatAgeMilliseconds,
+    required this.lastReceiveAgeMilliseconds,
+    required this.generationTotals,
+    required this.sinceHeartbeatSent,
+  });
+
+  final PhoenixSocketDiagnosticEvent event;
+
+  /// Local connection-attempt number; resets are independent of heartbeat refs.
+  final int connectionGeneration;
+  final int generationElapsedMilliseconds;
+  final int heartbeatAgeMilliseconds;
+  final int? lastReceiveAgeMilliseconds;
+  final PhoenixSocketReceiveCounters generationTotals;
+
+  /// Zero at `heartbeatSent`; subsequent counters cover only that send interval.
+  /// Max decode duration is measured for this interval, not a subtracted maximum.
+  final PhoenixSocketReceiveCounters sinceHeartbeatSent;
+}
+
 /// Base socket event
 abstract class PhoenixSocketEvent {
   const PhoenixSocketEvent();
